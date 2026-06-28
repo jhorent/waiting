@@ -1,0 +1,168 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Liste d'attente — Kinésithérapie</title>
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <header class="kine-header py-2 mb-3">
+    <div class="container">
+      <h1 class="h4 mb-0 text-white">Liste d'attente — Cabinet de Kinésithérapie</h1>
+    </div>
+  </header>
+
+  <main class="container pb-4">
+
+    <div id="error-alert" class="alert alert-danger alert-dismissible d-none" role="alert">
+      <strong>Erreur :</strong> <span id="error-message"></span>
+      <button type="button" class="btn-close" onclick="hideError()"></button>
+    </div>
+
+    <!-- Formulaire compact -->
+    <div class="card mb-3 shadow-sm">
+      <div class="card-header bg-light py-2" id="form-card-header">
+        <h2 class="h6 mb-0" id="form-title">Nouveau patient</h2>
+      </div>
+      <div class="card-body py-2 px-3">
+        <form id="patient-form" novalidate>
+          <div class="row g-2">
+            <div class="col-md-2">
+              <label for="prenom" class="form-label form-label-sm mb-1">Prénom <span class="text-danger">*</span></label>
+              <input type="text" class="form-control form-control-sm" id="prenom" placeholder="Jean" required>
+            </div>
+            <div class="col-md-2">
+              <label for="nom" class="form-label form-label-sm mb-1">Nom <span class="text-danger">*</span></label>
+              <input type="text" class="form-control form-control-sm" id="nom" placeholder="Dupont" required>
+            </div>
+            <div class="col-md-2">
+              <label for="telephone" class="form-label form-label-sm mb-1">Téléphone <span class="text-danger">*</span></label>
+              <input type="tel" class="form-control form-control-sm" id="telephone" placeholder="06 12 34 56 78" required>
+            </div>
+            <div class="col-md-2">
+              <label for="email" class="form-label form-label-sm mb-1">Email</label>
+              <input type="email" class="form-control form-control-sm" id="email" placeholder="jean@mail.com">
+            </div>
+            <div class="col-md-4">
+              <label for="motif" class="form-label form-label-sm mb-1">Motif <span class="text-danger">*</span></label>
+              <input type="text" class="form-control form-control-sm" id="motif" placeholder="Lombalgie, rééducation post-opératoire…" required>
+            </div>
+            <div class="col-md-2">
+              <label for="date-entree" class="form-label form-label-sm mb-1">Entrée <span class="text-danger">*</span></label>
+              <input type="date" class="form-control form-control-sm" id="date-entree" required>
+            </div>
+            <div class="col-md-2">
+              <label for="date-disponibilite" class="form-label form-label-sm mb-1">Disponible dès le</label>
+              <input type="date" class="form-control form-control-sm" id="date-disponibilite">
+            </div>
+            <div class="col-md-2 d-flex align-items-end gap-2">
+              <button type="submit" class="btn btn-primary btn-sm" id="btn-submit">Ajouter</button>
+              <button type="button" class="btn btn-outline-secondary btn-sm" onclick="resetForm()">Effacer</button>
+              <button type="button" class="btn btn-outline-warning btn-sm d-none" id="btn-cancel-edit" onclick="cancelEdit()">Annuler</button>
+            </div>
+          </div>
+        </form>
+      </div>
+    </div>
+
+    <!-- Onglets -->
+    <div class="card shadow-sm">
+      <div class="card-header bg-light px-3 pt-2 pb-0">
+        <div class="d-flex gap-2 mb-2 align-items-start">
+          <input type="search" class="form-control form-control-sm" id="search-global"
+            placeholder="Rechercher dans les deux listes (nom, prénom, téléphone, email, motif)…">
+          <div class="d-flex flex-column gap-1">
+            <div class="d-flex gap-2">
+              <button class="btn btn-sm btn-outline-success text-nowrap" onclick="exportAll()">⬇ Exporter</button>
+              <button class="btn btn-sm btn-outline-primary text-nowrap" onclick="document.getElementById('import-file').click()">⬆ Importer</button>
+              <input type="file" id="import-file" accept=".json" class="d-none">
+            </div>
+            <div class="d-flex align-items-center gap-2 small justify-content-end">
+              <span class="text-muted text-nowrap">Auto-export :</span>
+              <input type="number" id="autoexport-interval" class="form-control form-control-sm"
+                style="width:60px" min="0" max="120" placeholder="0">
+              <span class="text-muted text-nowrap">min</span>
+              <span id="autoexport-status" class="text-muted text-nowrap"></span>
+            </div>
+          </div>
+        </div>
+        <ul class="nav nav-tabs card-header-tabs border-bottom-0" id="mainTabs" role="tablist">
+          <li class="nav-item">
+            <button class="nav-link active" id="btn-tab-attente" data-bs-toggle="tab" data-bs-target="#tab-attente" type="button" role="tab">
+              Liste d'attente <span class="badge bg-primary rounded-pill ms-1" id="patient-count">0</span>
+            </button>
+          </li>
+          <li class="nav-item">
+            <button class="nav-link" id="btn-tab-archives" data-bs-toggle="tab" data-bs-target="#tab-archives" type="button" role="tab">
+              Archives <span class="badge bg-secondary rounded-pill ms-1" id="archive-count">0</span>
+            </button>
+          </li>
+        </ul>
+      </div>
+
+      <div class="tab-content">
+
+        <!-- Onglet liste d'attente -->
+        <div class="tab-pane fade show active" id="tab-attente" role="tabpanel">
+          <div class="table-responsive table-container">
+            <table class="table table-striped table-hover mb-0 align-middle">
+              <thead class="table-dark">
+                <tr>
+                  <th class="text-nowrap">Date d'entrée</th>
+                  <th>Nom</th>
+                  <th>Prénom</th>
+                  <th>Téléphone</th>
+                  <th>Email</th>
+                  <th>Motif</th>
+                  <th class="text-nowrap">Disponible le</th>
+                  <th>Statut</th>
+                </tr>
+              </thead>
+              <tbody id="patients-tbody"></tbody>
+            </table>
+          </div>
+        </div>
+
+        <!-- Onglet archives -->
+        <div class="tab-pane fade" id="tab-archives" role="tabpanel">
+          <div class="table-responsive table-container">
+            <table class="table table-striped table-hover mb-0 align-middle">
+              <thead class="table-dark">
+                <tr>
+                  <th class="text-nowrap">Date d'entrée</th>
+                  <th>Nom</th>
+                  <th>Prénom</th>
+                  <th>Téléphone</th>
+                  <th>Email</th>
+                  <th>Motif</th>
+                  <th class="text-nowrap">Disponible le</th>
+                  <th>Statut final</th>
+                  <th class="text-nowrap">Archivé le</th>
+                </tr>
+              </thead>
+              <tbody id="archives-tbody"></tbody>
+            </table>
+          </div>
+        </div>
+
+      </div>
+    </div>
+
+  </main>
+
+  <!-- Toast auto-export -->
+  <div class="toast-container position-fixed bottom-0 end-0 p-3">
+    <div id="autoexport-toast" class="toast align-items-center text-bg-success border-0" role="alert">
+      <div class="d-flex">
+        <div class="toast-body" id="autoexport-toast-body">Sauvegarde automatique effectuée.</div>
+        <button type="button" class="btn-close btn-close-white me-2 m-auto" data-bs-dismiss="toast"></button>
+      </div>
+    </div>
+  </div>
+
+  <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>

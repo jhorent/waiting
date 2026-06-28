@@ -1,0 +1,502 @@
+const STORAGE_KEY    = 'kine_patients';
+const ARCHIVE_KEY    = 'kine_patients_archives';
+const SHADOW_KEY     = 'kine_shadow_backup';
+const AUTOEXP_KEY    = 'kine_autoexport_minutes';
+
+const REQUIRED_FIELDS = ['prenom', 'nom', 'telephone', 'motif', 'date-entree'];
+
+let editState      = null;
+let isDirty        = false;
+let autoExportTimer = null;
+
+const STATUTS = {
+  en_attente:     { label: 'En attente',     badge: 'secondary' },
+  message_laisse: { label: 'Message laissé', badge: 'warning'   },
+  refuse:         { label: 'Refusé',         badge: 'danger'    },
+  rdv_confirme:   { label: 'RDV confirmé',   badge: 'success'   }
+};
+
+function loadPatients() {
+  const raw = localStorage.getItem(STORAGE_KEY);
+  return raw ? JSON.parse(raw) : [];
+}
+
+function savePatients(patients) {
+  localStorage.setItem(STORAGE_KEY, JSON.stringify(patients));
+  isDirty = true;
+}
+
+function loadArchives() {
+  const raw = localStorage.getItem(ARCHIVE_KEY);
+  return raw ? JSON.parse(raw) : [];
+}
+
+function saveArchives(archives) {
+  localStorage.setItem(ARCHIVE_KEY, JSON.stringify(archives));
+  isDirty = true;
+}
+
+function todayStr() {
+  const d = new Date();
+  return [
+    d.getFullYear(),
+    String(d.getMonth() + 1).padStart(2, '0'),
+    String(d.getDate()).padStart(2, '0')
+  ].join('-');
+}
+
+function formatDate(str) {
+  if (!str) return '—';
+  const [y, m, d] = str.split('-');
+  return `${d}/${m}/${y}`;
+}
+
+function formatDateTime(isoStr) {
+  if (!isoStr) return '—';
+  return new Date(isoStr).toLocaleString('fr-FR', {
+    day: '2-digit', month: '2-digit', year: 'numeric',
+    hour: '2-digit', minute: '2-digit'
+  });
+}
+
+function escapeHtml(str) {
+  return String(str)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
+}
+
+function showError(msg) {
+  const el = document.getElementById('error-alert');
+  document.getElementById('error-message').textContent = msg;
+  el.classList.remove('d-none');
+  el.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+}
+
+function hideError() {
+  document.getElementById('error-alert').classList.add('d-none');
+}
+
+function isDuplicate(prenom, nom, telephone) {
+  const prenomN = prenom.trim().toLowerCase();
+  const nomN    = nom.trim().toLowerCase();
+  const telN    = telephone.trim().replace(/\s/g, '');
+  return loadPatients().some(p => {
+    const sameName = p.prenom.toLowerCase() === prenomN && p.nom.toLowerCase() === nomN;
+    const sameTel  = p.telephone.replace(/\s/g, '') === telN;
+    return sameName || sameTel;
+  });
+}
+
+function formatPhone(raw) {
+  const digits = raw.replace(/\D/g, '').slice(0, 10);
+  return digits.replace(/(\d{2})(?=\d)/g, '$1 ');
+}
+
+function markErrors(ids) {
+  ids.forEach(id => {
+    const el = document.getElementById(id);
+    if (!el.value.trim()) el.classList.add('field-error');
+  });
+}
+
+function clearFieldError(id) {
+  document.getElementById(id).classList.remove('field-error');
+}
+
+function resetForm() {
+  document.getElementById('patient-form').reset();
+  document.getElementById('date-entree').value = todayStr();
+  REQUIRED_FIELDS.forEach(id => document.getElementById(id).classList.remove('field-error'));
+  hideError();
+}
+
+function startEdit(id, source) {
+  const list = source === 'archives' ? loadArchives() : loadPatients();
+  const p = list.find(p => p.id === id);
+  if (!p) return;
+
+  editState = { id, source };
+
+  document.getElementById('prenom').value           = p.prenom;
+  document.getElementById('nom').value              = p.nom;
+  document.getElementById('telephone').value        = p.telephone;
+  document.getElementById('email').value            = p.email || '';
+  document.getElementById('motif').value            = p.motif;
+  document.getElementById('date-entree').value      = p.dateEntree;
+  document.getElementById('date-disponibilite').value = p.dateDisponibilite || '';
+
+  const header = document.getElementById('form-card-header');
+  header.classList.replace('bg-light', 'bg-warning');
+  header.classList.add('bg-opacity-50');
+  document.getElementById('form-title').textContent = `Modifier — ${p.prenom} ${p.nom}`;
+  document.getElementById('btn-submit').textContent = 'Enregistrer';
+  document.getElementById('btn-cancel-edit').classList.remove('d-none');
+
+  document.getElementById('patient-form').closest('.card').scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+}
+
+function cancelEdit() {
+  editState = null;
+  const header = document.getElementById('form-card-header');
+  header.classList.replace('bg-warning', 'bg-light');
+  header.classList.remove('bg-opacity-50');
+  document.getElementById('form-title').textContent = 'Nouveau patient';
+  document.getElementById('btn-submit').textContent = 'Ajouter';
+  document.getElementById('btn-cancel-edit').classList.add('d-none');
+  resetForm();
+}
+
+function updateStatut(id, statut) {
+  const patients = loadPatients();
+  const p = patients.find(p => p.id === id);
+  if (p) {
+    p.statut = statut;
+    p.dateStatutChange = new Date().toISOString();
+    savePatients(patients);
+    renderAll();
+  }
+}
+
+function archivePatient(id) {
+  const patients = loadPatients();
+  const idx = patients.findIndex(p => p.id === id);
+  if (idx === -1) return;
+  const patient = { ...patients[idx], dateArchivage: new Date().toISOString() };
+  const archives = loadArchives();
+  archives.push(patient);
+  saveArchives(archives);
+  patients.splice(idx, 1);
+  savePatients(patients);
+  renderAll();
+}
+
+function downloadJSON(data, filename) {
+  const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
+function exportAll() {
+  const data = {
+    exportDate: new Date().toISOString(),
+    patients: loadPatients(),
+    archives: loadArchives()
+  };
+  downloadJSON(data, `kine_backup_${todayStr()}.json`);
+}
+
+const STATUT_LABELS = {
+  'en attente':    'en_attente',
+  'message laissé':'message_laisse',
+  'message laisse':'message_laisse',
+  'refusé':        'refuse',
+  'refuse':        'refuse',
+  'rdv confirmé':  'rdv_confirme',
+  'rdv confirme':  'rdv_confirme'
+};
+
+function normalizeStatut(val) {
+  if (!val) return 'en_attente';
+  if (STATUTS[val]) return val;
+  return STATUT_LABELS[val.toLowerCase().trim()] || 'en_attente';
+}
+
+function normalizeDate(val) {
+  if (!val) return '';
+  if (/^\d{4}-\d{2}-\d{2}$/.test(val)) return val;
+  return '';
+}
+
+function normalizeImport(data) {
+  let counter = Date.now();
+  const seenIds = new Set();
+
+  function fixBase(p) {
+    let id = p.id;
+    if (!id || seenIds.has(id)) id = counter++;
+    seenIds.add(id);
+    const nom    = p.nom    || p.prenom || '';
+    const prenom = p.prenom || p.nom    || '';
+    return {
+      ...p,
+      id,
+      nom,
+      prenom,
+      email:            p.email || '',
+      statut:           normalizeStatut(p.statut),
+      dateEntree:       normalizeDate(p.dateEntree),
+      dateDisponibilite:normalizeDate(p.dateDisponibilite)
+    };
+  }
+
+  return {
+    ...data,
+    patients: data.patients.map(p => fixBase(p)),
+    archives: data.archives.map(p => ({
+      ...fixBase(p),
+      dateArchivage: p.dateArchivage || p.dateStatutChange || new Date().toISOString()
+    }))
+  };
+}
+
+function importAll(event) {
+  const file = event.target.files[0];
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = function (e) {
+    try {
+      const raw = JSON.parse(e.target.result);
+      if (!Array.isArray(raw.patients) || !Array.isArray(raw.archives)) {
+        alert('Fichier invalide : il doit contenir les champs "patients" et "archives".');
+        return;
+      }
+      const data = normalizeImport(raw);
+      const msg = `Importer ${data.patients.length} patient(s) en attente et ${data.archives.length} archive(s) ?\n\nLes données actuelles seront remplacées.`;
+      if (!confirm(msg)) return;
+      savePatients(data.patients);
+      saveArchives(data.archives);
+      renderAll();
+    } catch(err) {
+      alert('Erreur import : ' + err.message);
+    }
+  };
+  reader.readAsText(file);
+  event.target.value = '';
+}
+
+function showToast(msg) {
+  document.getElementById('autoexport-toast-body').textContent = msg;
+  bootstrap.Toast.getOrCreateInstance(document.getElementById('autoexport-toast'), { delay: 4000 }).show();
+}
+
+function autoExportNow() {
+  if (!isDirty) return;
+  const data = {
+    exportDate: new Date().toISOString(),
+    patients: loadPatients(),
+    archives: loadArchives()
+  };
+  localStorage.setItem(SHADOW_KEY, JSON.stringify(data));
+  downloadJSON(data, `kine_backup_${todayStr()}.json`);
+  isDirty = false;
+  const time = new Date().toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' });
+  document.getElementById('autoexport-status').textContent = `Dernière sauvegarde : ${time}`;
+  showToast(`Sauvegarde automatique effectuée à ${time}`);
+}
+
+function setupAutoExport() {
+  if (autoExportTimer) clearInterval(autoExportTimer);
+  const minutes = parseInt(document.getElementById('autoexport-interval').value) || 0;
+  localStorage.setItem(AUTOEXP_KEY, minutes);
+  const statusEl = document.getElementById('autoexport-status');
+  if (minutes > 0) {
+    autoExportTimer = setInterval(autoExportNow, minutes * 60 * 1000);
+    statusEl.textContent = statusEl.textContent || 'En attente de changement…';
+  } else {
+    statusEl.textContent = 'Désactivé';
+  }
+}
+
+function matchesSearch(p, query) {
+  if (!query) return true;
+  const q = query.toLowerCase();
+  return [p.nom, p.prenom, p.telephone, p.email, p.motif]
+    .some(v => v && v.toLowerCase().includes(q));
+}
+
+function renderTable(query) {
+  const all = loadPatients().sort((a, b) => b.dateEntree.localeCompare(a.dateEntree));
+  const patients = query ? all.filter(p => matchesSearch(p, query)) : all;
+
+  document.getElementById('patient-count').textContent =
+    query ? `${patients.length}/${all.length}` : all.length;
+
+  const tbody = document.getElementById('patients-tbody');
+
+  if (patients.length === 0) {
+    tbody.innerHTML = '<tr><td colspan="8" class="text-center text-muted py-4">Aucun patient dans la liste d\'attente</td></tr>';
+    return 0;
+  }
+
+  tbody.innerHTML = patients.map(p => {
+    const options = Object.entries(STATUTS)
+      .map(([key, val]) => `<option value="${key}"${p.statut === key ? ' selected' : ''}>${val.label}</option>`)
+      .join('');
+
+    const archiveBtn = p.statut !== 'en_attente'
+      ? `<button class="btn btn-sm btn-outline-secondary ms-1 text-nowrap" onclick="archivePatient(${p.id})" title="Archiver ce patient">Archiver</button>`
+      : '';
+
+    return `<tr class="row-editable" onclick="startEdit(${p.id}, 'patients')">
+      <td class="text-nowrap">${formatDate(p.dateEntree)}</td>
+      <td><strong>${escapeHtml(p.nom)}</strong></td>
+      <td>${escapeHtml(p.prenom)}</td>
+      <td class="text-nowrap">${escapeHtml(p.telephone)}</td>
+      <td>${p.email ? escapeHtml(p.email) : '—'}</td>
+      <td class="motif-cell">${escapeHtml(p.motif)}</td>
+      <td class="text-nowrap">${formatDate(p.dateDisponibilite)}</td>
+      <td onclick="event.stopPropagation()">
+        <div class="d-flex align-items-center flex-nowrap">
+          <select class="form-select form-select-sm statut-select" data-id="${p.id}">
+            ${options}
+          </select>
+          ${archiveBtn}
+        </div>
+      </td>
+    </tr>`;
+  }).join('');
+
+  tbody.querySelectorAll('.statut-select').forEach(sel => {
+    sel.addEventListener('change', e => updateStatut(Number(e.target.dataset.id), e.target.value));
+  });
+
+  return patients.length;
+}
+
+function updateArchiveStatut(id, statut) {
+  const archives = loadArchives();
+  const p = archives.find(p => p.id === id);
+  if (p) {
+    p.statut = statut;
+    p.dateStatutChange = new Date().toISOString();
+    saveArchives(archives);
+    renderAll();
+  }
+}
+
+function renderArchives(query) {
+  const all = loadArchives().sort((a, b) => b.dateArchivage.localeCompare(a.dateArchivage));
+  const archives = query ? all.filter(p => matchesSearch(p, query)) : all;
+
+  document.getElementById('archive-count').textContent =
+    query ? `${archives.length}/${all.length}` : all.length;
+
+  const tbody = document.getElementById('archives-tbody');
+
+  if (archives.length === 0) {
+    tbody.innerHTML = '<tr><td colspan="9" class="text-center text-muted py-4">Aucune archive</td></tr>';
+    return 0;
+  }
+
+  tbody.innerHTML = archives.map(p => {
+    const archiveOptions = Object.entries(STATUTS)
+      .filter(([key]) => key !== 'en_attente')
+      .map(([key, val]) => `<option value="${key}"${p.statut === key ? ' selected' : ''}>${val.label}</option>`)
+      .join('');
+
+    return `<tr class="row-editable" onclick="startEdit(${p.id}, 'archives')">
+      <td class="text-nowrap">${formatDate(p.dateEntree)}</td>
+      <td><strong>${escapeHtml(p.nom)}</strong></td>
+      <td>${escapeHtml(p.prenom)}</td>
+      <td class="text-nowrap">${escapeHtml(p.telephone)}</td>
+      <td>${p.email ? escapeHtml(p.email) : '—'}</td>
+      <td class="motif-cell">${escapeHtml(p.motif)}</td>
+      <td class="text-nowrap">${formatDate(p.dateDisponibilite)}</td>
+      <td onclick="event.stopPropagation()">
+        <select class="form-select form-select-sm archive-statut-select" data-id="${p.id}">
+          ${archiveOptions}
+        </select>
+      </td>
+      <td class="text-nowrap">${formatDateTime(p.dateArchivage)}</td>
+    </tr>`;
+  }).join('');
+
+  tbody.querySelectorAll('.archive-statut-select').forEach(sel => {
+    sel.addEventListener('change', e => updateArchiveStatut(Number(e.target.dataset.id), e.target.value));
+  });
+
+  return archives.length;
+}
+
+function renderAll() {
+  const query = document.getElementById('search-global').value.trim();
+  const attenteCount  = renderTable(query);
+  const archivesCount = renderArchives(query);
+
+  if (query) {
+    const btnAttente  = document.getElementById('btn-tab-attente');
+    const btnArchives = document.getElementById('btn-tab-archives');
+    if (archivesCount > attenteCount) {
+      bootstrap.Tab.getOrCreateInstance(btnArchives).show();
+    } else {
+      bootstrap.Tab.getOrCreateInstance(btnAttente).show();
+    }
+  }
+}
+
+document.addEventListener('DOMContentLoaded', () => {
+  document.getElementById('date-entree').value = todayStr();
+
+  document.getElementById('search-global').addEventListener('input', renderAll);
+  document.getElementById('import-file').addEventListener('change', importAll);
+
+  const savedInterval = localStorage.getItem(AUTOEXP_KEY);
+  if (savedInterval !== null) {
+    document.getElementById('autoexport-interval').value = savedInterval;
+  }
+  document.getElementById('autoexport-interval').addEventListener('change', setupAutoExport);
+  setupAutoExport();
+
+  document.getElementById('telephone').addEventListener('input', e => {
+    e.target.value = formatPhone(e.target.value);
+  });
+
+  REQUIRED_FIELDS.forEach(id => {
+    document.getElementById(id).addEventListener('input', () => clearFieldError(id));
+  });
+
+  document.getElementById('patient-form').addEventListener('submit', e => {
+    e.preventDefault();
+    hideError();
+
+    const prenom            = document.getElementById('prenom').value.trim();
+    const nom               = document.getElementById('nom').value.trim();
+    const telephone         = document.getElementById('telephone').value.trim();
+    const email             = document.getElementById('email').value.trim();
+    const motif             = document.getElementById('motif').value.trim();
+    const dateEntree        = document.getElementById('date-entree').value;
+    const dateDisponibilite = document.getElementById('date-disponibilite').value;
+
+    if (!prenom || !nom || !telephone || !motif || !dateEntree) {
+      markErrors(['prenom', 'nom', 'telephone', 'motif', 'date-entree']);
+      showError('Veuillez remplir tous les champs obligatoires (marqués *).');
+      return;
+    }
+
+    if (editState) {
+      const list = editState.source === 'archives' ? loadArchives() : loadPatients();
+      const idx = list.findIndex(p => p.id === editState.id);
+      if (idx !== -1) {
+        list[idx] = { ...list[idx], prenom, nom, telephone, email, motif, dateEntree, dateDisponibilite };
+        editState.source === 'archives' ? saveArchives(list) : savePatients(list);
+      }
+      cancelEdit();
+      renderAll();
+      return;
+    }
+
+    if (isDuplicate(prenom, nom, telephone)) {
+      showError('Un patient avec ce nom/prénom ou ce numéro de téléphone existe déjà dans la liste.');
+      return;
+    }
+
+    const patients = loadPatients();
+    patients.push({
+      id: Date.now(),
+      prenom, nom, telephone, email, motif,
+      dateEntree, dateDisponibilite,
+      statut: 'en_attente'
+    });
+    savePatients(patients);
+    resetForm();
+    renderAll();
+  });
+
+  renderAll();
+});
