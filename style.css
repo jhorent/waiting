@@ -81,3 +81,32 @@ body {
   max-height: calc(100vh - 240px);
   overflow-y: auto;
 }
+
+/* --- Tri --- */
+.sort-th {
+  cursor: pointer;
+  user-select: none;
+  white-space: nowrap;
+}
+
+.sort-th:hover {
+  background-color: #373b3e !important;
+  color: #fff !important;
+}
+
+.sort-arrow::before {
+  content: '⇅';
+  font-size: 0.7em;
+  opacity: 0.45;
+  margin-left: 4px;
+}
+
+.sort-th.sort-asc .sort-arrow::before {
+  content: '↑';
+  opacity: 1;
+}
+
+.sort-th.sort-desc .sort-arrow::before {
+  content: '↓';
+  opacity: 1;
+}
