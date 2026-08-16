@@ -353,7 +353,13 @@ function toggleSort(table, field) {
 }
 
 function applySort(items, state) {
-  if (!state.field) return items.sort((a, b) => a.id - b.id);
+  if (!state.field) {
+    return items.sort((a, b) => {
+      const da = a.dateEntree || '', db = b.dateEntree || '';
+      if (da !== db) return da > db ? -1 : 1;
+      return (a.nom || '').toLowerCase() < (b.nom || '').toLowerCase() ? -1 : 1;
+    });
+  }
   return items.sort((a, b) => {
     let va = a[state.field] || '';
     let vb = b[state.field] || '';
