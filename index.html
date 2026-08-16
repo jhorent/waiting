@@ -57,6 +57,31 @@
               <label for="date-disponibilite" class="form-label form-label-sm mb-1">Disponible dès le</label>
               <input type="date" class="form-control form-control-sm" id="date-disponibilite">
             </div>
+            <div class="col-md-4">
+              <label class="form-label form-label-sm mb-1">Jours disponibles</label>
+              <div class="d-flex gap-2 pt-1">
+                <div class="form-check form-check-inline me-0">
+                  <input class="form-check-input jour-check" type="checkbox" id="jour-lun" value="lun">
+                  <label class="form-check-label small" for="jour-lun">Lun</label>
+                </div>
+                <div class="form-check form-check-inline me-0">
+                  <input class="form-check-input jour-check" type="checkbox" id="jour-mar" value="mar">
+                  <label class="form-check-label small" for="jour-mar">Mar</label>
+                </div>
+                <div class="form-check form-check-inline me-0">
+                  <input class="form-check-input jour-check" type="checkbox" id="jour-mer" value="mer">
+                  <label class="form-check-label small" for="jour-mer">Mer</label>
+                </div>
+                <div class="form-check form-check-inline me-0">
+                  <input class="form-check-input jour-check" type="checkbox" id="jour-jeu" value="jeu">
+                  <label class="form-check-label small" for="jour-jeu">Jeu</label>
+                </div>
+                <div class="form-check form-check-inline me-0">
+                  <input class="form-check-input jour-check" type="checkbox" id="jour-ven" value="ven">
+                  <label class="form-check-label small" for="jour-ven">Ven</label>
+                </div>
+              </div>
+            </div>
             <div class="col-md-2 d-flex align-items-end gap-2">
               <button type="submit" class="btn btn-primary btn-sm" id="btn-submit">Ajouter</button>
               <button type="button" class="btn btn-outline-secondary btn-sm" onclick="resetForm()">Effacer</button>
@@ -102,7 +127,7 @@
         </ul>
       </div>
 
-      <div class="tab-content">
+      <div class="tab-content pt-2">
 
         <!-- Onglet liste d'attente -->
         <div class="tab-pane fade show active" id="tab-attente" role="tabpanel">
@@ -110,13 +135,14 @@
             <table class="table table-striped table-hover mb-0 align-middle">
               <thead class="table-dark">
                 <tr>
-                  <th class="text-nowrap">Date d'entrée</th>
-                  <th>Nom</th>
+                  <th class="text-nowrap sort-th" id="th-attente-date" onclick="toggleSort('patients','dateEntree')">Date d'entrée <span class="sort-arrow"></span></th>
+                  <th class="sort-th" id="th-attente-nom" onclick="toggleSort('patients','nom')">Nom <span class="sort-arrow"></span></th>
                   <th>Prénom</th>
                   <th>Téléphone</th>
                   <th>Email</th>
                   <th>Motif</th>
-                  <th class="text-nowrap">Disponible le</th>
+                  <th class="text-nowrap sort-th" id="th-attente-dispo" onclick="toggleSort('patients','dateDisponibilite')">Disponible le <span class="sort-arrow"></span></th>
+                  <th class="text-nowrap">Jours</th>
                   <th>Statut</th>
                 </tr>
               </thead>
@@ -131,15 +157,16 @@
             <table class="table table-striped table-hover mb-0 align-middle">
               <thead class="table-dark">
                 <tr>
-                  <th class="text-nowrap">Date d'entrée</th>
-                  <th>Nom</th>
+                  <th class="text-nowrap sort-th" id="th-archives-date" onclick="toggleSort('archives','dateEntree')">Date d'entrée <span class="sort-arrow"></span></th>
+                  <th class="sort-th" id="th-archives-nom" onclick="toggleSort('archives','nom')">Nom <span class="sort-arrow"></span></th>
                   <th>Prénom</th>
                   <th>Téléphone</th>
                   <th>Email</th>
                   <th>Motif</th>
-                  <th class="text-nowrap">Disponible le</th>
+                  <th class="text-nowrap sort-th" id="th-archives-dispo" onclick="toggleSort('archives','dateDisponibilite')">Disponible le <span class="sort-arrow"></span></th>
+                  <th class="text-nowrap">Jours</th>
                   <th>Statut final</th>
-                  <th class="text-nowrap">Archivé le</th>
+                  <th class="text-nowrap sort-th" id="th-archives-archive" onclick="toggleSort('archives','dateArchivage')">Archivé le <span class="sort-arrow"></span></th>
                 </tr>
               </thead>
               <tbody id="archives-tbody"></tbody>
