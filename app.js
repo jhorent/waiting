@@ -3,7 +3,7 @@ const ARCHIVE_KEY    = 'kine_patients_archives';
 const SHADOW_KEY     = 'kine_shadow_backup';
 const AUTOEXP_KEY    = 'kine_autoexport_minutes';
 
-const REQUIRED_FIELDS = ['prenom', 'nom', 'telephone', 'motif', 'date-entree'];
+const REQUIRED_FIELDS = ['nom', 'telephone', 'motif', 'date-entree'];
 
 let editState      = null;
 let isDirty        = false;
@@ -16,6 +16,12 @@ const STATUTS = {
   message_laisse: { label: 'Message laissé', badge: 'warning'   },
   refuse:         { label: 'Refusé',         badge: 'danger'    },
   rdv_confirme:   { label: 'RDV confirmé',   badge: 'success'   }
+};
+
+const KINES = {
+  antoine: { label: 'Antoine', color: '#1565c0' },
+  aymeric: { label: 'Aymeric', color: '#212121' },
+  rym:     { label: 'Rym',     color: '#e65100' },
 };
 
 function loadPatients() {
@@ -45,6 +51,26 @@ function todayStr() {
     String(d.getMonth() + 1).padStart(2, '0'),
     String(d.getDate()).padStart(2, '0')
   ].join('-');
+}
+
+function dateToInput(str) {
+  if (!str) return '';
+  const [y, m, d] = str.split('-');
+  return `${d}/${m}/${y}`;
+}
+
+function inputToDate(str) {
+  if (!str) return '';
+  const parts = str.split('/');
+  if (parts.length !== 3 || parts[2].length !== 4) return '';
+  return `${parts[2]}-${parts[1].padStart(2,'0')}-${parts[0].padStart(2,'0')}`;
+}
+
+function formatDateInput(raw) {
+  const digits = raw.replace(/\D/g, '').slice(0, 8);
+  if (digits.length <= 2) return digits;
+  if (digits.length <= 4) return digits.slice(0, 2) + '/' + digits.slice(2);
+  return digits.slice(0, 2) + '/' + digits.slice(2, 4) + '/' + digits.slice(4);
 }
 
 function formatDate(str) {
@@ -86,12 +112,11 @@ function hideError() {
   document.getElementById('error-alert').classList.add('d-none');
 }
 
-function isDuplicate(prenom, nom, telephone) {
-  const prenomN = prenom.trim().toLowerCase();
-  const nomN    = nom.trim().toLowerCase();
-  const telN    = telephone.trim().replace(/\s/g, '');
+function isDuplicate(nom, telephone) {
+  const nomN = nom.trim().toLowerCase();
+  const telN = telephone.trim().replace(/\s/g, '');
   return loadPatients().some(p => {
-    const sameName = p.prenom.toLowerCase() === prenomN && p.nom.toLowerCase() === nomN;
+    const sameName = p.nom.toLowerCase() === nomN;
     const sameTel  = p.telephone.replace(/\s/g, '') === telN;
     return sameName || sameTel;
   });
@@ -115,7 +140,7 @@ function clearFieldError(id) {
 
 function resetForm() {
   document.getElementById('patient-form').reset();
-  document.getElementById('date-entree').value = todayStr();
+  document.getElementById('date-entree').value = dateToInput(todayStr());
   document.querySelectorAll('.jour-check').forEach(cb => cb.checked = false);
   REQUIRED_FIELDS.forEach(id => document.getElementById(id).classList.remove('field-error'));
   hideError();
@@ -128,20 +153,21 @@ function startEdit(id, source) {
 
   editState = { id, source };
 
-  document.getElementById('prenom').value           = p.prenom;
   document.getElementById('nom').value              = p.nom;
+  const kineRadio = document.querySelector(`input[name="kine"][value="${p.kine || ''}"]`);
+  if (kineRadio) kineRadio.checked = true;
+  document.getElementById('valide').checked = !!p.valide;
   document.getElementById('telephone').value        = p.telephone;
-  document.getElementById('email').value            = p.email || '';
   document.getElementById('motif').value            = p.motif;
-  document.getElementById('date-entree').value      = p.dateEntree;
-  document.getElementById('date-disponibilite').value = p.dateDisponibilite || '';
+  document.getElementById('date-entree').value      = dateToInput(p.dateEntree);
+  document.getElementById('date-disponibilite').value = dateToInput(p.dateDisponibilite || '');
   const jours = p.joursDisponibles || [];
   document.querySelectorAll('.jour-check').forEach(cb => cb.checked = jours.includes(cb.value));
 
   const header = document.getElementById('form-card-header');
   header.classList.replace('bg-light', 'bg-warning');
   header.classList.add('bg-opacity-50');
-  document.getElementById('form-title').textContent = `Modifier — ${p.prenom} ${p.nom}`;
+  document.getElementById('form-title').textContent = `Modifier — ${p.nom}`;
   document.getElementById('btn-submit').textContent = 'Enregistrer';
   document.getElementById('btn-cancel-edit').classList.remove('d-none');
 
@@ -232,15 +258,14 @@ function normalizeImport(data) {
     let id = p.id;
     if (!id || seenIds.has(id)) id = counter++;
     seenIds.add(id);
-    const nom    = p.nom    || p.prenom || '';
-    const prenom = p.prenom || p.nom    || '';
+    const nom = p.nom || '';
     return {
       ...p,
       id,
       nom,
-      prenom,
-      email:            p.email || '',
       statut:           normalizeStatut(p.statut),
+      kine:             p.kine || '',
+      valide:           !!p.valide,
       dateEntree:       normalizeDate(p.dateEntree),
       dateDisponibilite:normalizeDate(p.dateDisponibilite),
       joursDisponibles: Array.isArray(p.joursDisponibles) ? p.joursDisponibles : []
@@ -328,7 +353,13 @@ function toggleSort(table, field) {
 }
 
 function applySort(items, state) {
-  if (!state.field) return items.sort((a, b) => a.id - b.id);
+  if (!state.field) {
+    return items.sort((a, b) => {
+      const da = a.dateEntree || '', db = b.dateEntree || '';
+      if (da !== db) return da > db ? -1 : 1;
+      return (a.nom || '').toLowerCase() < (b.nom || '').toLowerCase() ? -1 : 1;
+    });
+  }
   return items.sort((a, b) => {
     let va = a[state.field] || '';
     let vb = b[state.field] || '';
@@ -361,7 +392,7 @@ function updateSortHeaders() {
 function matchesSearch(p, query) {
   if (!query) return true;
   const q = query.toLowerCase();
-  return [p.nom, p.prenom, p.telephone, p.email, p.motif]
+  return [p.nom, p.telephone, p.motif]
     .some(v => v && v.toLowerCase().includes(q));
 }
 
@@ -391,10 +422,10 @@ function renderTable(query) {
     return `<tr class="row-editable" onclick="startEdit(${p.id}, 'patients')">
       <td class="text-nowrap">${formatDate(p.dateEntree)}</td>
       <td><strong>${escapeHtml(p.nom)}</strong></td>
-      <td>${escapeHtml(p.prenom)}</td>
+      <td class="text-center" onclick="event.stopPropagation()"><input type="checkbox" class="form-check-input" ${p.valide ? 'checked' : ''} onchange="toggleValide(${p.id}, 'patients')"></td>
+      <td class="text-center">${p.kine && KINES[p.kine] ? `<span class="kine-dot" style="background:${KINES[p.kine].color}" title="${KINES[p.kine].label}"></span>` : ''}</td>
       <td class="text-nowrap">${escapeHtml(p.telephone)}</td>
-      <td>${p.email ? escapeHtml(p.email) : '—'}</td>
-      <td class="motif-cell">${escapeHtml(p.motif)}</td>
+      <td class="motif-cell" title="${escapeHtml(p.motif)}">${escapeHtml(p.motif)}</td>
       <td class="text-nowrap">${formatDate(p.dateDisponibilite)}</td>
       <td class="text-nowrap">${formatJours(p.joursDisponibles)}</td>
       <td onclick="event.stopPropagation()">
@@ -413,6 +444,29 @@ function renderTable(query) {
   });
 
   return patients.length;
+}
+
+function unarchivePatient(id) {
+  const archives = loadArchives();
+  const idx = archives.findIndex(p => p.id === id);
+  if (idx === -1) return;
+  const patient = { ...archives[idx], statut: 'en_attente' };
+  delete patient.dateArchivage;
+  const patients = loadPatients();
+  patients.push(patient);
+  savePatients(patients);
+  archives.splice(idx, 1);
+  saveArchives(archives);
+  renderAll();
+}
+
+function toggleValide(id, source) {
+  const list = source === 'archives' ? loadArchives() : loadPatients();
+  const p = list.find(p => p.id === id);
+  if (!p) return;
+  p.valide = !p.valide;
+  source === 'archives' ? saveArchives(list) : savePatients(list);
+  renderAll();
 }
 
 function updateArchiveStatut(id, statut) {
@@ -449,16 +503,19 @@ function renderArchives(query) {
     return `<tr class="row-editable" onclick="startEdit(${p.id}, 'archives')">
       <td class="text-nowrap">${formatDate(p.dateEntree)}</td>
       <td><strong>${escapeHtml(p.nom)}</strong></td>
-      <td>${escapeHtml(p.prenom)}</td>
+      <td class="text-center" onclick="event.stopPropagation()"><input type="checkbox" class="form-check-input" ${p.valide ? 'checked' : ''} onchange="toggleValide(${p.id}, 'archives')"></td>
+      <td class="text-center">${p.kine && KINES[p.kine] ? `<span class="kine-dot" style="background:${KINES[p.kine].color}" title="${KINES[p.kine].label}"></span>` : ''}</td>
       <td class="text-nowrap">${escapeHtml(p.telephone)}</td>
-      <td>${p.email ? escapeHtml(p.email) : '—'}</td>
-      <td class="motif-cell">${escapeHtml(p.motif)}</td>
+      <td class="motif-cell" title="${escapeHtml(p.motif)}">${escapeHtml(p.motif)}</td>
       <td class="text-nowrap">${formatDate(p.dateDisponibilite)}</td>
       <td class="text-nowrap">${formatJours(p.joursDisponibles)}</td>
       <td onclick="event.stopPropagation()">
-        <select class="form-select form-select-sm archive-statut-select" data-id="${p.id}">
-          ${archiveOptions}
-        </select>
+        <div class="d-flex align-items-center flex-nowrap gap-1">
+          <select class="form-select form-select-sm archive-statut-select" data-id="${p.id}">
+            ${archiveOptions}
+          </select>
+          <button class="btn btn-sm btn-outline-secondary text-nowrap" onclick="unarchivePatient(${p.id})" title="Remettre en liste d'attente">↩</button>
+        </div>
       </td>
       <td class="text-nowrap">${formatDateTime(p.dateArchivage)}</td>
     </tr>`;
@@ -489,7 +546,7 @@ function renderAll() {
 }
 
 document.addEventListener('DOMContentLoaded', () => {
-  document.getElementById('date-entree').value = todayStr();
+  document.getElementById('date-entree').value = dateToInput(todayStr());
 
   document.getElementById('search-global').addEventListener('input', renderAll);
   document.getElementById('import-file').addEventListener('change', importAll);
@@ -505,6 +562,12 @@ document.addEventListener('DOMContentLoaded', () => {
     e.target.value = formatPhone(e.target.value);
   });
 
+  ['date-entree', 'date-disponibilite'].forEach(id => {
+    document.getElementById(id).addEventListener('input', e => {
+      e.target.value = formatDateInput(e.target.value);
+    });
+  });
+
   REQUIRED_FIELDS.forEach(id => {
     document.getElementById(id).addEventListener('input', () => clearFieldError(id));
   });
@@ -513,17 +576,17 @@ document.addEventListener('DOMContentLoaded', () => {
     e.preventDefault();
     hideError();
 
-    const prenom            = document.getElementById('prenom').value.trim();
     const nom               = document.getElementById('nom').value.trim();
     const telephone         = document.getElementById('telephone').value.trim();
-    const email             = document.getElementById('email').value.trim();
     const motif             = document.getElementById('motif').value.trim();
-    const dateEntree        = document.getElementById('date-entree').value;
-    const dateDisponibilite = document.getElementById('date-disponibilite').value;
+    const dateEntree        = inputToDate(document.getElementById('date-entree').value);
+    const dateDisponibilite = inputToDate(document.getElementById('date-disponibilite').value);
     const joursDisponibles  = Array.from(document.querySelectorAll('.jour-check:checked')).map(cb => cb.value);
+    const kine              = document.querySelector('input[name="kine"]:checked')?.value || '';
+    const valide            = document.getElementById('valide').checked;
 
-    if (!prenom || !nom || !telephone || !motif || !dateEntree) {
-      markErrors(['prenom', 'nom', 'telephone', 'motif', 'date-entree']);
+    if (!nom || !telephone || !motif || !dateEntree) {
+      markErrors(['nom', 'telephone', 'motif', 'date-entree']);
       showError('Veuillez remplir tous les champs obligatoires (marqués *).');
       return;
     }
@@ -532,7 +595,7 @@ document.addEventListener('DOMContentLoaded', () => {
       const list = editState.source === 'archives' ? loadArchives() : loadPatients();
       const idx = list.findIndex(p => p.id === editState.id);
       if (idx !== -1) {
-        list[idx] = { ...list[idx], prenom, nom, telephone, email, motif, dateEntree, dateDisponibilite, joursDisponibles };
+        list[idx] = { ...list[idx], nom, telephone, motif, dateEntree, dateDisponibilite, joursDisponibles, kine, valide };
         editState.source === 'archives' ? saveArchives(list) : savePatients(list);
       }
       cancelEdit();
@@ -540,7 +603,7 @@ document.addEventListener('DOMContentLoaded', () => {
       return;
     }
 
-    if (isDuplicate(prenom, nom, telephone)) {
+    if (isDuplicate(nom, telephone)) {
       showError('Un patient avec ce nom/prénom ou ce numéro de téléphone existe déjà dans la liste.');
       return;
     }
@@ -548,8 +611,8 @@ document.addEventListener('DOMContentLoaded', () => {
     const patients = loadPatients();
     patients.push({
       id: Date.now(),
-      prenom, nom, telephone, email, motif,
-      dateEntree, dateDisponibilite, joursDisponibles,
+      nom, telephone, motif,
+      dateEntree, dateDisponibilite, joursDisponibles, kine, valide,
       statut: 'en_attente'
     });
     savePatients(patients);
