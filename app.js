@@ -8,6 +8,8 @@ const REQUIRED_FIELDS = ['prenom', 'nom', 'telephone', 'motif', 'date-entree'];
 let editState      = null;
 let isDirty        = false;
 let autoExportTimer = null;
+let patientSort    = { field: null, dir: 'asc' };
+let archiveSort    = { field: null, dir: 'asc' };
 
 const STATUTS = {
   en_attente:     { label: 'En attente',     badge: 'secondary' },
@@ -49,6 +51,12 @@ function formatDate(str) {
   if (!str) return '—';
   const [y, m, d] = str.split('-');
   return `${d}/${m}/${y}`;
+}
+
+function formatJours(jours) {
+  if (!jours || jours.length === 0) return '—';
+  const order = ['lun', 'mar', 'mer', 'jeu', 'ven'];
+  return order.filter(j => jours.includes(j)).join('/');
 }
 
 function formatDateTime(isoStr) {
@@ -108,6 +116,7 @@ function clearFieldError(id) {
 function resetForm() {
   document.getElementById('patient-form').reset();
   document.getElementById('date-entree').value = todayStr();
+  document.querySelectorAll('.jour-check').forEach(cb => cb.checked = false);
   REQUIRED_FIELDS.forEach(id => document.getElementById(id).classList.remove('field-error'));
   hideError();
 }
@@ -126,6 +135,8 @@ function startEdit(id, source) {
   document.getElementById('motif').value            = p.motif;
   document.getElementById('date-entree').value      = p.dateEntree;
   document.getElementById('date-disponibilite').value = p.dateDisponibilite || '';
+  const jours = p.joursDisponibles || [];
+  document.querySelectorAll('.jour-check').forEach(cb => cb.checked = jours.includes(cb.value));
 
   const header = document.getElementById('form-card-header');
   header.classList.replace('bg-light', 'bg-warning');
@@ -231,7 +242,8 @@ function normalizeImport(data) {
       email:            p.email || '',
       statut:           normalizeStatut(p.statut),
       dateEntree:       normalizeDate(p.dateEntree),
-      dateDisponibilite:normalizeDate(p.dateDisponibilite)
+      dateDisponibilite:normalizeDate(p.dateDisponibilite),
+      joursDisponibles: Array.isArray(p.joursDisponibles) ? p.joursDisponibles : []
     };
   }
 
@@ -303,6 +315,49 @@ function setupAutoExport() {
   }
 }
 
+function toggleSort(table, field) {
+  const state = table === 'patients' ? patientSort : archiveSort;
+  if (state.field === field) {
+    if (state.dir === 'asc') state.dir = 'desc';
+    else { state.field = null; state.dir = 'asc'; }
+  } else {
+    state.field = field;
+    state.dir = 'asc';
+  }
+  renderAll();
+}
+
+function applySort(items, state) {
+  if (!state.field) return items.sort((a, b) => a.id - b.id);
+  return items.sort((a, b) => {
+    let va = a[state.field] || '';
+    let vb = b[state.field] || '';
+    if (state.field === 'nom') { va = va.toLowerCase(); vb = vb.toLowerCase(); }
+    const cmp = va < vb ? -1 : va > vb ? 1 : 0;
+    return state.dir === 'asc' ? cmp : -cmp;
+  });
+}
+
+function updateSortHeaders() {
+  const COLS = [
+    ['date',    'dateEntree'],
+    ['nom',     'nom'],
+    ['dispo',   'dateDisponibilite'],
+    ['archive', 'dateArchivage'],
+  ];
+  [
+    { prefix: 'attente',  state: patientSort },
+    { prefix: 'archives', state: archiveSort }
+  ].forEach(({ prefix, state }) => {
+    COLS.forEach(([key, field]) => {
+      const th = document.getElementById(`th-${prefix}-${key}`);
+      if (!th) return;
+      th.classList.remove('sort-asc', 'sort-desc');
+      if (state.field === field) th.classList.add(`sort-${state.dir}`);
+    });
+  });
+}
+
 function matchesSearch(p, query) {
   if (!query) return true;
   const q = query.toLowerCase();
@@ -311,7 +366,7 @@ function matchesSearch(p, query) {
 }
 
 function renderTable(query) {
-  const all = loadPatients().sort((a, b) => b.dateEntree.localeCompare(a.dateEntree));
+  const all = applySort(loadPatients(), patientSort);
   const patients = query ? all.filter(p => matchesSearch(p, query)) : all;
 
   document.getElementById('patient-count').textContent =
@@ -320,7 +375,7 @@ function renderTable(query) {
   const tbody = document.getElementById('patients-tbody');
 
   if (patients.length === 0) {
-    tbody.innerHTML = '<tr><td colspan="8" class="text-center text-muted py-4">Aucun patient dans la liste d\'attente</td></tr>';
+    tbody.innerHTML = '<tr><td colspan="9" class="text-center text-muted py-4">Aucun patient dans la liste d\'attente</td></tr>';
     return 0;
   }
 
@@ -341,6 +396,7 @@ function renderTable(query) {
       <td>${p.email ? escapeHtml(p.email) : '—'}</td>
       <td class="motif-cell">${escapeHtml(p.motif)}</td>
       <td class="text-nowrap">${formatDate(p.dateDisponibilite)}</td>
+      <td class="text-nowrap">${formatJours(p.joursDisponibles)}</td>
       <td onclick="event.stopPropagation()">
         <div class="d-flex align-items-center flex-nowrap">
           <select class="form-select form-select-sm statut-select" data-id="${p.id}">
@@ -371,7 +427,7 @@ function updateArchiveStatut(id, statut) {
 }
 
 function renderArchives(query) {
-  const all = loadArchives().sort((a, b) => b.dateArchivage.localeCompare(a.dateArchivage));
+  const all = applySort(loadArchives(), archiveSort);
   const archives = query ? all.filter(p => matchesSearch(p, query)) : all;
 
   document.getElementById('archive-count').textContent =
@@ -380,7 +436,7 @@ function renderArchives(query) {
   const tbody = document.getElementById('archives-tbody');
 
   if (archives.length === 0) {
-    tbody.innerHTML = '<tr><td colspan="9" class="text-center text-muted py-4">Aucune archive</td></tr>';
+    tbody.innerHTML = '<tr><td colspan="10" class="text-center text-muted py-4">Aucune archive</td></tr>';
     return 0;
   }
 
@@ -398,6 +454,7 @@ function renderArchives(query) {
       <td>${p.email ? escapeHtml(p.email) : '—'}</td>
       <td class="motif-cell">${escapeHtml(p.motif)}</td>
       <td class="text-nowrap">${formatDate(p.dateDisponibilite)}</td>
+      <td class="text-nowrap">${formatJours(p.joursDisponibles)}</td>
       <td onclick="event.stopPropagation()">
         <select class="form-select form-select-sm archive-statut-select" data-id="${p.id}">
           ${archiveOptions}
@@ -428,6 +485,7 @@ function renderAll() {
       bootstrap.Tab.getOrCreateInstance(btnAttente).show();
     }
   }
+  updateSortHeaders();
 }
 
 document.addEventListener('DOMContentLoaded', () => {
@@ -462,6 +520,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const motif             = document.getElementById('motif').value.trim();
     const dateEntree        = document.getElementById('date-entree').value;
     const dateDisponibilite = document.getElementById('date-disponibilite').value;
+    const joursDisponibles  = Array.from(document.querySelectorAll('.jour-check:checked')).map(cb => cb.value);
 
     if (!prenom || !nom || !telephone || !motif || !dateEntree) {
       markErrors(['prenom', 'nom', 'telephone', 'motif', 'date-entree']);
@@ -473,7 +532,7 @@ document.addEventListener('DOMContentLoaded', () => {
       const list = editState.source === 'archives' ? loadArchives() : loadPatients();
       const idx = list.findIndex(p => p.id === editState.id);
       if (idx !== -1) {
-        list[idx] = { ...list[idx], prenom, nom, telephone, email, motif, dateEntree, dateDisponibilite };
+        list[idx] = { ...list[idx], prenom, nom, telephone, email, motif, dateEntree, dateDisponibilite, joursDisponibles };
         editState.source === 'archives' ? saveArchives(list) : savePatients(list);
       }
       cancelEdit();
@@ -490,7 +549,7 @@ document.addEventListener('DOMContentLoaded', () => {
     patients.push({
       id: Date.now(),
       prenom, nom, telephone, email, motif,
-      dateEntree, dateDisponibilite,
+      dateEntree, dateDisponibilite, joursDisponibles,
       statut: 'en_attente'
     });
     savePatients(patients);
