@@ -14,7 +14,7 @@ Three files, no framework, no bundler:
 |---|---|
 | `index.html` | DOM structure — form, two-tab layout (waiting list + archives), toast |
 | `style.css` | Custom styles layered on top of Bootstrap 5.3.3 (CDN) |
-| `app.js` | All application logic — ~560 lines, no modules |
+| `app.js` | All application logic — ~600 lines, no modules |
 
 **External dependency:** Bootstrap 5.3.3 loaded from `cdn.jsdelivr.net` (CSS + JS bundle). No other dependencies.
 
@@ -35,21 +35,27 @@ Load/save via `loadPatients()` / `savePatients()` and `loadArchives()` / `saveAr
 
 ```json
 {
-  "id": 1719571234567,        // Date.now() at creation
-  "prenom": "Jean",
+  "id": 1719571234567,
   "nom": "Dupont",
   "telephone": "06 12 34 56 78",
-  "email": "jean@mail.com",   // optional
   "motif": "Lombalgie",
   "dateEntree": "2026-06-28",
-  "dateDisponibilite": "2026-07-15",  // optional
-  "joursDisponibles": ["lun", "mer"], // subset of lun/mar/mer/jeu/ven
+  "dateDisponibilite": "2026-07-15",
+  "joursDisponibles": ["lun", "mer"],
+  "kine": "antoine",
+  "valide": false,
   "statut": "en_attente",
   "dateStatutChange": "2026-06-28T14:32:00.000Z"
 }
 ```
 
 Archived patients add `dateArchivage` (ISO 8601). Status values: `en_attente`, `message_laisse`, `refuse`, `rdv_confirme`. Archives cannot have status `en_attente`.
+
+`kine` values: `"antoine"`, `"aymeric"`, `"rym"`, or `""` (unassigned). Colors defined in the `KINES` constant in `app.js`.
+
+## Date handling
+
+Dates are stored as `yyyy-mm-dd` (ISO) in localStorage. The form displays and accepts `dd/mm/yyyy`. Conversion is handled by `dateToInput()` (ISO → display) and `inputToDate()` (display → ISO). `formatDateInput()` auto-inserts slashes as the user types, mirroring the phone formatter pattern.
 
 ## Rendering flow
 
@@ -64,6 +70,7 @@ Sort state is held in module-level `patientSort` / `archiveSort` objects `{ fiel
 ## Key conventions
 
 - Phone numbers are formatted `XX XX XX XX XX` by `formatPhone()` on every `input` event.
-- Duplicate detection checks name+firstname pair OR phone number against the active waiting list only (not archives).
-- Import via `normalizeImport()` repairs missing/duplicate IDs and normalises status strings before writing to storage.
-- `enh02.txt` is a historical diff log of past enhancement sessions — reference only, not executed.
+- Duplicate detection checks nom OR phone number against the active waiting list only (not archives).
+- The `valide` checkbox can be toggled directly in the table row via `toggleValide(id, source)` without opening edit mode — same pattern as the statut dropdown.
+- Archiving is manual: the **Archiver** button appears in the Statut column once status ≠ `en_attente`. The **↩** button in archives reverses the operation via `unarchivePatient(id)`.
+- Import via `normalizeImport()` repairs missing/duplicate IDs and normalises status and kine strings before writing to storage. Fields absent from old backups (`kine`, `valide`) default to `''` / `false`.
